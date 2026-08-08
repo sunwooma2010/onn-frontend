@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --gemini-bg: #131314;
+    --gemini-card: #1e1f20;
+    --gemini-hover: #282a2c;
+    --gemini-border: #37393b;
+    --gemini-accent: #a8c7fa;
+    --gemini-text: #e3e2e6;
+    --gemini-muted: #9aa0a6;
+  }
+}
+
+body {
+  margin: 0;
+  background-color: #000;
+  color: #e3e2e6;
+  font-family: 'Noto Sans KR', sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
