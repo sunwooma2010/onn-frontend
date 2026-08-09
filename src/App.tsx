@@ -79,20 +79,6 @@ export default function App() {
   const [classNum, setClassNum] = useState<number>(0);
 
   useEffect(() => {
-    setLoading(true);
-    api
-      .get<ScheduleResponse[]>("/schedules")
-      .then((res) => {
-        setSchedules(res.data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("일정 로딩 실패:", err);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get("code");
 
@@ -103,33 +89,22 @@ export default function App() {
           redirect_uri: REDIRECT_URI,
         })
         .then((res) => {
-          // 백엔드에서 반환해 준 사용자 이메일 추출
           const userEmail = res.data?.email;
-
-          // 이메일 정보가 제대로 수신되지 않은 경우에만 예외 처리
           if (!userEmail) {
             alert("사용자 이메일 정보를 불러올 수 없습니다.");
             return;
           }
-
-          // ADMIN_EMAIL 목록에 존재하는지 체크 (관리자 여부 확인)
           const adminList = ADMIN_EMAIL.split(",").map((e) => e.trim());
           const isAdminUser = adminList.includes(userEmail);
-
-          // 로그인 성공 알림 (관리자/일반 사용자 구별)
           if (isAdminUser) {
             alert(`관리자(${userEmail}) 권한으로 로그인되었습니다.`);
           } else {
             alert(`로그인되었습니다. (${userEmail})`);
           }
-
-          // 관리자 여부 상관없이 사용자 상태 저장 (로그인 승인)
           setUser({
             email: userEmail,
             name: res.data?.name,
           });
-
-          // URL 주소창의 code 쿼리 파라미터 깔끔하게 제거
           window.history.replaceState(
             {},
             document.title,
@@ -220,7 +195,8 @@ export default function App() {
 
   const isAdmin = useMemo(() => {
     if (!user || !ADMIN_EMAIL.trim()) return false;
-    return user.email === ADMIN_EMAIL;
+    const adminList = ADMIN_EMAIL.split(",").map((e) => e.trim());
+    return adminList.includes(user.email);
   }, [user]);
 
   const handleGradeChange = (gradeVal: number) => {
@@ -640,7 +616,7 @@ export default function App() {
                               className="text-xs text-red-400 hover:text-red-300 transition-colors p-1"
                               title="일정 삭제"
                             >
-                              🗑️
+                              <FaRegTrashCan />
                             </button>
                           )}
                         </div>
