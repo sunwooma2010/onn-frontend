@@ -4,6 +4,7 @@ import type { ScheduleResponse } from "./types/api";
 import { BsMegaphoneFill } from "react-icons/bs";
 import { FaCalendarAlt } from "react-icons/fa";
 import { FaRegTrashCan } from "react-icons/fa6";
+import { IoSettingsOutline } from "react-icons/io5";
 
 const GOOGLE_CLIENT_ID =
   "540014946000-43qnhms27eobeqi3p9a04ttcacar6f43.apps.googleusercontent.com";
@@ -77,86 +78,105 @@ export default function App() {
   const [noticeContent, setNoticeContent] = useState("");
   const [grade, setGrade] = useState<number>(0);
   const [classNum, setClassNum] = useState<number>(0);
+  const closeAdminModal = () => {
+    setNewTitle("");
+    setNewContent("");
+    setNoticeTitle("");
+    setNoticeContent("");
+    setIsAdminOpen(false);
+  };
 
+  // 0. 앱 접속 시 로그인 상태 검사 (/me)
+  useEffect(() => {
+    const checkLoginStatus = async () => {
+      try {
+        const res = await api.get<string>("/me");
+        // /me는 문자열 이메일을 응답하므로 res.data가 바로 이메일입니다.
+        if (res.data) {
+          setUser({ email: res.data });
+        }
+      } catch (err) {
+        setUser(null);
+      }
+    };
+    checkLoginStatus();
+  }, []);
+
+  // 1. Google OAuth 리다이렉트 처리 (Code -> Token 요청)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get("code");
 
     if (authCode) {
+      // 주소창에서 code 파라미터 먼저 지우기
+      window.history.replaceState({}, document.title, window.location.pathname);
+
+      // /token 요청으로 쿠키 발급받기
       api
-        .post("/auth", {
+        .post("/token", {
           auth_code: authCode,
           redirect_uri: REDIRECT_URI,
         })
-        .then((res) => {
-          const userEmail = res.data?.email;
-          if (!userEmail) {
-            alert("사용자 이메일 정보를 불러올 수 없습니다.");
-            return;
+        .then(async () => {
+          // 토큰 쿠키 생성 후 /me 요청으로 유저 이메일 가져오기
+          try {
+            const meRes = await api.get<string>("/me");
+            if (meRes.data) {
+              setUser({ email: meRes.data });
+            }
+          } catch (err) {
+            console.error("사용자 정보 조회 실패:", err);
           }
-          const adminList = ADMIN_EMAIL.split(",").map((e) => e.trim());
-          const isAdminUser = adminList.includes(userEmail);
-          if (isAdminUser) {
-            alert(`관리자(${userEmail}) 권한으로 로그인되었습니다.`);
-          } else {
-            alert(`로그인되었습니다. (${userEmail})`);
-          }
-          setUser({
-            email: userEmail,
-            name: res.data?.name,
-          });
-          window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname,
-          );
         })
         .catch((err) => {
-          console.error("로그인 실패 상세 원인:", err.response?.data || err);
-          alert(
-            `로그인 처리 중 오류가 발생했습니다. (${
-              err.response?.status || "통신 오류"
-            })`,
-          );
-          window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname,
-          );
+          if (err.response && err.response.status === 401) {
+          } else {
+            console.warn("로그인 실패:", err.message);
+            alert("로그인 중 오류가 발생했습니다.");
+          }
         });
     }
   }, []);
 
   useEffect(() => {
     api
-      .get<NoticeItem[]>("/posts")
+      .get("/posts")
       .then((res) => {
         if (Array.isArray(res.data)) {
-          const sorted = [...res.data].sort((a, b) => {
-            const numA = Number(a.id);
-            const numB = Number(b.id);
-            if (!isNaN(numA) && !isNaN(numB)) {
-              return numB - numA; // ⭕ 내림차순 정렬 -> notices[0]이 최신 공지가 됨
-            }
-            return b.date.localeCompare(a.date);
+          const formattedNotices: NoticeItem[] = res.data.map((item: any) => {
+            // 날짜 가공 (createdAt 또는 date 필드 호환)
+            const rawDate = item.date || item.createdAt || "";
+            const formattedDate = rawDate
+              ? rawDate.split("T")[0].replace(/-/g, ".")
+              : "";
+
+            return {
+              id: String(item.id),
+              // 백엔드에서 category를 안 넘겨주면 기본값 "일반"
+              category: item.category || "일반",
+              title: item.title,
+              content: item.content,
+              date: formattedDate,
+            };
           });
-          setNotices(sorted);
+
+          setNotices(formattedNotices);
         }
       })
-      .catch((err) => {
-        console.error("공지사항 로딩 실패:", err);
-      });
+      .catch((err) => console.error("공지사항 로딩 실패:", err));
   }, []);
 
   useEffect(() => {
     const fetchSchedules = async () => {
       setLoading(true);
       try {
+        // 보내야 할 파라미터 객체를 동적으로 생성
+        const queryParams: Record<string, number> = {};
+        if (grade !== 0) queryParams.grade = grade;
+        if (classNum !== 0) queryParams.classNum = classNum;
+
         const response = await api.get<ScheduleResponse[]>("/schedules", {
-          params: {
-            grade: grade,
-            classNum: classNum,
-          },
+          params: queryParams, // 0일 때는 빈 객체({})가 들어가서 파라미터 없이 요청됨
         });
         setSchedules(response.data);
       } catch (err) {
@@ -181,7 +201,7 @@ export default function App() {
 
   const handleLogout = () => {
     api
-      .delete("/auth")
+      .delete("/token")
       .then(() => {
         setUser(null);
         setIsAdminOpen(false);
@@ -208,11 +228,17 @@ export default function App() {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
+    const parsedGrade = Number(newGrade);
+    const parsedClassNum = Number(newClassNum);
+
     const requestBody = {
       title: newTitle,
       content: newContent,
-      grade: Number(newGrade),
-      classNum: Number(newGrade === 0 ? 0 : newClassNum),
+      // 학년이 0(선택 안함/전체)이면 null, 아니면 숫자 전달
+      grade: parsedGrade === 0 ? null : parsedGrade,
+      // 학년이 0이거나 반이 0이면 null, 아니면 숫자 전달
+      classNum:
+        parsedGrade === 0 || parsedClassNum === 0 ? null : parsedClassNum,
       endDate: formatISOToLocal(targetScheduleDate),
     };
 
@@ -220,9 +246,6 @@ export default function App() {
       const response = await api.post("/schedules", requestBody);
       if (response.status === 201 || response.status === 200) {
         alert("새 일정이 성공적으로 DB에 등록되었습니다!");
-        setNewTitle("");
-        setNewContent("");
-        setIsAdminOpen(false);
 
         setLoading(true);
         const updatedRes = await api.get<ScheduleResponse[]>("/schedules", {
@@ -230,6 +253,7 @@ export default function App() {
         });
         setSchedules(updatedRes.data);
         setLoading(false);
+        closeAdminModal();
       }
     } catch (err: any) {
       console.error("일정 등록 실패:", err);
@@ -270,10 +294,7 @@ export default function App() {
         };
 
         setNotices((prev) => [...prev, newNoticeItem]);
-
-        setNoticeTitle("");
-        setNoticeContent("");
-        setIsAdminOpen(false);
+        closeAdminModal();
       }
     } catch (err: any) {
       console.error("공지사항 등록 실패:", err);
@@ -655,7 +676,10 @@ export default function App() {
               }}
               className="border hover:bg-[#282a2c] active:scale-[0.95] transition-all duration-150 px-3.5 py-2 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5"
             >
-              <span>⚙️ 관리자 탭</span>
+              <span className="flex items-center">
+                <IoSettingsOutline />
+                <span className="pl-1"> 관리자 탭</span>
+              </span>
             </button>
           )}
         </div>
@@ -768,7 +792,10 @@ export default function App() {
                   }}
                   className="px-3 py-1 rounded-lg text-xs font-bold transition-all duration-150 active:scale-[0.95]"
                 >
-                  <FaRegTrashCan /> 일정 등록
+                  <span className="flex items-center">
+                    <FaCalendarAlt />
+                    <span className="pl-1">일정 등록</span>
+                  </span>
                 </button>
                 <button
                   onClick={() => setAdminTab("notice")}
@@ -779,7 +806,10 @@ export default function App() {
                   }}
                   className="px-3 py-1 rounded-lg text-xs font-bold transition-all duration-150 active:scale-[0.95]"
                 >
-                  <BsMegaphoneFill /> 전체 공지 등록
+                  <span className="flex items-center">
+                    <BsMegaphoneFill />
+                    <span className="pl-1">전체 공지 등록</span>
+                  </span>
                 </button>
               </div>
               <button

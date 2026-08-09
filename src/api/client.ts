@@ -9,7 +9,7 @@ const getCookie = (name: string): string | null => {
 
 // 백엔드 API 통신용 Axios 인스턴스 생성
 export const api = axios.create({
-  baseURL: 'http://localhost:8080',
+  baseURL: 'http://localhost:8080/',
   withCredentials: true,
 });
 
