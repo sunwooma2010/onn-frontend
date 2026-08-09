@@ -136,9 +136,9 @@ export default function App() {
             const numA = Number(a.id);
             const numB = Number(b.id);
             if (!isNaN(numA) && !isNaN(numB)) {
-              return numA - numB;
+              return numB - numA; // ⭕ 내림차순 정렬 -> notices[0]이 최신 공지가 됨
             }
-            return a.date.localeCompare(b.date);
+            return b.date.localeCompare(a.date);
           });
           setNotices(sorted);
         }
@@ -225,7 +225,9 @@ export default function App() {
         setIsAdminOpen(false);
 
         setLoading(true);
-        const updatedRes = await api.get<ScheduleResponse[]>("/schedules");
+        const updatedRes = await api.get<ScheduleResponse[]>("/schedules", {
+          params: { grade, classNum },
+        });
         setSchedules(updatedRes.data);
         setLoading(false);
       }
@@ -340,7 +342,7 @@ export default function App() {
   return (
     <div
       style={{ backgroundColor: "#131314" }}
-      className="w-[360px] h-[100vh] flex flex-col relative overflow-hidden shadow-2xl text-[#e3e2e6] select-none touch-none"
+      className="w-[360px] h-[100vh] flex flex-col relative overflow-hidden shadow-2xl text-[#e3e2e6] select-none"
     >
       <div className="px-4 pt-4 pb-1 z-10">
         <div
