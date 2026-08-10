@@ -26,7 +26,6 @@ interface UserInfo {
 }
 
 const CLASS_NUMBERS = Array.from({ length: 12 }, (_, i) => i + 1);
-// 공지 카테고리 한글 <-> 백엔드 enum(Post.PostCategory) 매핑
 const NOTICE_CATEGORY_TO_ENUM: Record<
   "주요공지" | "행사안내" | "일반",
   string
@@ -105,7 +104,6 @@ export default function App() {
     setIsAdminOpen(false);
   };
 
-  // 로그인 상태 검사 (/me)
   useEffect(() => {
     const checkLoginStatus = async () => {
       try {
@@ -120,7 +118,6 @@ export default function App() {
     checkLoginStatus();
   }, []);
 
-  // Google OAuth 리다이렉트 처리
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get("code");
@@ -152,7 +149,6 @@ export default function App() {
     }
   }, []);
 
-  // 공지사항 조회
   useEffect(() => {
     api
       .get("/posts")
@@ -263,9 +259,9 @@ export default function App() {
     try {
       const response = await api.post("/schedules", requestBody);
       if (response.status === 201 || response.status === 200) {
-        await fetchSchedules(); // 전체 일정 상태 다시 로드
-        closeAdminModal(); // 모달을 먼저 닫고
-        alert("새 일정이 성공적으로 등록되었습니다."); // 그 다음 알림 표시
+        await fetchSchedules();
+        closeAdminModal();
+        alert("새 일정이 성공적으로 등록되었습니다.");
       }
     } catch (err: any) {
       console.error("일정 등록 실패:", err);
@@ -297,9 +293,6 @@ export default function App() {
       const response = await api.post("/posts", requestBody);
       if (response.status === 201 || response.status === 200) {
         alert("새 공지사항이 성공적으로 게시되었습니다.");
-
-        // POST 응답에 category/createdAt이 함께 오면 그 값을 우선 사용하고,
-        // 응답 바디가 비어있는 경우(201 + Body 없음)에는 방금 입력한 값으로 대체합니다.
         const rawCategory = response.data?.category ?? requestBody.category;
         const rawDate = response.data?.createdAt ?? requestBody.date;
 
@@ -373,13 +366,11 @@ export default function App() {
   const adminFirstDay = new Date(adminYear, adminMonth, 1).getDay();
   const adminLastDate = new Date(adminYear, adminMonth + 1, 0).getDate();
   const getScheduleRank = (item: ScheduleResponse): number => {
-    if (!item.grade || item.grade === 0) return 0; // 전체 공통 일정
-    if (!item.classNum || item.classNum === 0) return 1; // 학년 전체 일정
-    return 2; // 특정 반 일정
+    if (!item.grade || item.grade === 0) return 0;
+    if (!item.classNum || item.classNum === 0) return 1;
+    return 2;
   };
 
-  // 날짜 및 상위 필터 포함 로직 개선
-  // 날짜 및 상위 필터 포함 및 상위->하위 순서 정렬 로직
   const filteredSchedules = useMemo(() => {
     if (!selectedDate) return [];
     return schedules
@@ -392,21 +383,20 @@ export default function App() {
 
         if (!isSameDate) return false;
 
-        // 상위 (전체/학년전체) 일정 포함 필터링
-        if (grade === 0) return true; // 전체 학급 선택 시 모든 날짜 일치건 표시
-        if (item.grade === null || item.grade === 0) return true; // 전체 공통 일정 표시
+        if (grade === 0) return true;
+        if (item.grade === null || item.grade === 0) return true;
         if (item.grade === grade) {
-          if (classNum === 0) return true; // 특정 학년 전체 선택 시 해당 학년 공통 + 반 일정
+          if (classNum === 0) return true;
           return (
             item.classNum === null ||
             item.classNum === 0 ||
             item.classNum === classNum
-          ); // 특정 반 선택 시 상위 학년 공통 포함
+          );
         }
 
         return false;
       })
-      .sort((a, b) => getScheduleRank(a) - getScheduleRank(b)); // 전체 공통 -> 학년 전체 -> 반별 순 정렬
+      .sort((a, b) => getScheduleRank(a) - getScheduleRank(b));
   }, [schedules, selectedDate, grade, classNum]);
 
   return (
