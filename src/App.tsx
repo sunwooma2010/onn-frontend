@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { api } from "./api/client";
 import type { ScheduleResponse } from "./types/api";
 import { BsMegaphoneFill } from "react-icons/bs";
@@ -26,6 +26,24 @@ interface UserInfo {
 }
 
 const CLASS_NUMBERS = Array.from({ length: 12 }, (_, i) => i + 1);
+// 공지 카테고리 한글 <-> 백엔드 enum(Post.PostCategory) 매핑
+const NOTICE_CATEGORY_TO_ENUM: Record<
+  "주요공지" | "행사안내" | "일반",
+  string
+> = {
+  주요공지: "IMPORTANT",
+  행사안내: "EVENTS",
+  일반: "GENERAL",
+};
+
+const ENUM_TO_NOTICE_CATEGORY: Record<
+  string,
+  "주요공지" | "행사안내" | "일반"
+> = {
+  IMPORTANT: "주요공지",
+  EVENTS: "행사안내",
+  GENERAL: "일반",
+};
 
 export default function App() {
   const formatISOToLocal = (date: Date): string => {
@@ -39,38 +57,33 @@ export default function App() {
     return `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`;
   };
 
-  const getTodayDateString = (): string => {
+  const getTodayFormattedDate = (): string => {
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const dd = String(today.getDate()).padStart(2, "0");
-    return `${yyyy}. ${mm}. ${dd}`;
+    return `${yyyy}-${mm}-${dd}`;
   };
 
   const [schedules, setSchedules] = useState<ScheduleResponse[]>([]);
   const [notices, setNotices] = useState<NoticeItem[]>([]);
   const [loading, setLoading] = useState(true);
-
   const [user, setUser] = useState<UserInfo | null>(null);
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-
   const [selectedTarget, setSelectedTarget] = useState("전체 학급");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [openGrade, setOpenGrade] = useState<number | null>(null);
-
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isNoticeModalOpen, setIsNoticeModalOpen] = useState(false);
   const [adminTab, setAdminTab] = useState<"schedule" | "notice">("schedule");
-
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
   const [newGrade, setNewGrade] = useState(0);
   const [newClassNum, setNewClassNum] = useState(0);
   const [targetScheduleDate, setTargetScheduleDate] = useState(new Date());
   const [adminCalMonth, setAdminCalMonth] = useState(new Date());
-
   const [noticeCategory, setNoticeCategory] = useState<
     "주요공지" | "행사안내" | "일반"
   >("주요공지");
@@ -78,20 +91,25 @@ export default function App() {
   const [noticeContent, setNoticeContent] = useState("");
   const [grade, setGrade] = useState<number>(0);
   const [classNum, setClassNum] = useState<number>(0);
+
   const closeAdminModal = () => {
     setNewTitle("");
     setNewContent("");
     setNoticeTitle("");
     setNoticeContent("");
+    setNewGrade(0);
+    setNewClassNum(0);
+    setTargetScheduleDate(new Date());
+    setAdminCalMonth(new Date());
+    setAdminTab("schedule");
     setIsAdminOpen(false);
   };
 
-  // 0. 앱 접속 시 로그인 상태 검사 (/me)
+  // 로그인 상태 검사 (/me)
   useEffect(() => {
     const checkLoginStatus = async () => {
       try {
         const res = await api.get<string>("/me");
-        // /me는 문자열 이메일을 응답하므로 res.data가 바로 이메일입니다.
         if (res.data) {
           setUser({ email: res.data });
         }
@@ -102,23 +120,20 @@ export default function App() {
     checkLoginStatus();
   }, []);
 
-  // 1. Google OAuth 리다이렉트 처리 (Code -> Token 요청)
+  // Google OAuth 리다이렉트 처리
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get("code");
 
     if (authCode) {
-      // 주소창에서 code 파라미터 먼저 지우기
       window.history.replaceState({}, document.title, window.location.pathname);
 
-      // /token 요청으로 쿠키 발급받기
       api
         .post("/token", {
           auth_code: authCode,
           redirect_uri: REDIRECT_URI,
         })
         .then(async () => {
-          // 토큰 쿠키 생성 후 /me 요청으로 유저 이메일 가져오기
           try {
             const meRes = await api.get<string>("/me");
             if (meRes.data) {
@@ -129,8 +144,7 @@ export default function App() {
           }
         })
         .catch((err) => {
-          if (err.response && err.response.status === 401) {
-          } else {
+          if (!(err.response && err.response.status === 401)) {
             console.warn("로그인 실패:", err.message);
             alert("로그인 중 오류가 발생했습니다.");
           }
@@ -138,22 +152,20 @@ export default function App() {
     }
   }, []);
 
+  // 공지사항 조회
   useEffect(() => {
     api
       .get("/posts")
       .then((res) => {
         if (Array.isArray(res.data)) {
           const formattedNotices: NoticeItem[] = res.data.map((item: any) => {
-            // 날짜 가공 (createdAt 또는 date 필드 호환)
-            const rawDate = item.date || item.createdAt || "";
-            const formattedDate = rawDate
-              ? rawDate.split("T")[0].replace(/-/g, ".")
+            const formattedDate = item.createdAt
+              ? String(item.createdAt).split("T")[0].replace(/-/g, ".")
               : "";
 
             return {
               id: String(item.id),
-              // 백엔드에서 category를 안 넘겨주면 기본값 "일반"
-              category: item.category || "일반",
+              category: ENUM_TO_NOTICE_CATEGORY[item.category] || "일반",
               title: item.title,
               content: item.content,
               date: formattedDate,
@@ -166,28 +178,36 @@ export default function App() {
       .catch((err) => console.error("공지사항 로딩 실패:", err));
   }, []);
 
+  const fetchSchedules = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [commonRes, ...gradeResList] = await Promise.all([
+        api.get<ScheduleResponse[]>("/schedules"),
+        ...[1, 2, 3].map((g) =>
+          api.get<ScheduleResponse[]>("/schedules", { params: { grade: g } }),
+        ),
+      ]);
+
+      const merged = [
+        ...commonRes.data,
+        ...gradeResList.flatMap((res) => res.data),
+      ];
+
+      const uniqueSchedules = Array.from(
+        new Map(merged.map((item) => [item.id, item])).values(),
+      );
+
+      setSchedules(uniqueSchedules);
+    } catch (err) {
+      console.error("일정 불러오기 실패:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    const fetchSchedules = async () => {
-      setLoading(true);
-      try {
-        // 보내야 할 파라미터 객체를 동적으로 생성
-        const queryParams: Record<string, number> = {};
-        if (grade !== 0) queryParams.grade = grade;
-        if (classNum !== 0) queryParams.classNum = classNum;
-
-        const response = await api.get<ScheduleResponse[]>("/schedules", {
-          params: queryParams, // 0일 때는 빈 객체({})가 들어가서 파라미터 없이 요청됨
-        });
-        setSchedules(response.data);
-      } catch (err) {
-        console.error("일정 불러오기 실패:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchSchedules();
-  }, [grade, classNum]);
+  }, [fetchSchedules]);
 
   const handleGoogleLogin = () => {
     const scope =
@@ -234,9 +254,7 @@ export default function App() {
     const requestBody = {
       title: newTitle,
       content: newContent,
-      // 학년이 0(선택 안함/전체)이면 null, 아니면 숫자 전달
       grade: parsedGrade === 0 ? null : parsedGrade,
-      // 학년이 0이거나 반이 0이면 null, 아니면 숫자 전달
       classNum:
         parsedGrade === 0 || parsedClassNum === 0 ? null : parsedClassNum,
       endDate: formatISOToLocal(targetScheduleDate),
@@ -245,15 +263,9 @@ export default function App() {
     try {
       const response = await api.post("/schedules", requestBody);
       if (response.status === 201 || response.status === 200) {
-        alert("새 일정이 성공적으로 DB에 등록되었습니다!");
-
-        setLoading(true);
-        const updatedRes = await api.get<ScheduleResponse[]>("/schedules", {
-          params: { grade, classNum },
-        });
-        setSchedules(updatedRes.data);
-        setLoading(false);
-        closeAdminModal();
+        await fetchSchedules(); // 전체 일정 상태 다시 로드
+        closeAdminModal(); // 모달을 먼저 닫고
+        alert("새 일정이 성공적으로 등록되었습니다."); // 그 다음 알림 표시
       }
     } catch (err: any) {
       console.error("일정 등록 실패:", err);
@@ -271,37 +283,52 @@ export default function App() {
     e.preventDefault();
     if (!noticeTitle.trim()) return;
 
-    const currentDateStr = getTodayDateString();
+    const now = new Date();
+    const currentDateStr = getTodayFormattedDate();
 
     const requestBody = {
       title: noticeTitle,
       content: noticeContent,
-      category: noticeCategory,
-      date: currentDateStr,
+      category: NOTICE_CATEGORY_TO_ENUM[noticeCategory],
+      date: formatISOToLocal(now),
     };
 
     try {
       const response = await api.post("/posts", requestBody);
       if (response.status === 201 || response.status === 200) {
-        alert("새 공지사항이 성공적으로 게시되었습니다!");
+        alert("새 공지사항이 성공적으로 게시되었습니다.");
+
+        // POST 응답에 category/createdAt이 함께 오면 그 값을 우선 사용하고,
+        // 응답 바디가 비어있는 경우(201 + Body 없음)에는 방금 입력한 값으로 대체합니다.
+        const rawCategory = response.data?.category ?? requestBody.category;
+        const rawDate = response.data?.createdAt ?? requestBody.date;
 
         const newNoticeItem: NoticeItem = {
           id: String(response.data?.id || Date.now()),
-          category: noticeCategory,
+          category: ENUM_TO_NOTICE_CATEGORY[rawCategory] || noticeCategory,
           title: noticeTitle,
           content: noticeContent,
-          date: currentDateStr,
+          date: rawDate
+            ? String(rawDate).split("T")[0].replace(/-/g, ".")
+            : currentDateStr.replace(/-/g, "."),
         };
-
-        setNotices((prev) => [...prev, newNoticeItem]);
+        setNotices((prev) => [newNoticeItem, ...prev]);
         closeAdminModal();
       }
     } catch (err: any) {
       console.error("공지사항 등록 실패:", err);
-      if (err.response?.status === 401) {
+      if (err.response?.status === 400) {
+        alert(
+          "요청 형식이 올바르지 않습니다 (400 Bad Request). 카테고리 값 등을 확인해주세요.",
+        );
+      } else if (err.response?.status === 401) {
         alert("로그인 세션이 만료되었거나 권한이 없습니다 (401).");
       } else if (err.response?.status === 403) {
         alert("관리자 권한이 필요합니다.");
+      } else if (err.response?.status === 500) {
+        alert(
+          "서버 내부 오류(500)가 발생했습니다. 날짜 형식 등 요청 데이터를 다시 확인해주세요.",
+        );
       } else {
         alert("공지사항 등록 도중 오류가 발생했습니다.");
       }
@@ -310,7 +337,6 @@ export default function App() {
 
   const handleDeleteNotice = async (postId: string) => {
     if (!confirm("정말 이 공지사항을 삭제하시겠습니까?")) return;
-
     try {
       await api.delete(`/posts?postId=${postId}`);
       alert("공지사항이 삭제되었습니다.");
@@ -323,7 +349,6 @@ export default function App() {
 
   const handleDeleteSchedule = async (scheduleId: string) => {
     if (!confirm("정말 이 일정을 삭제하시겠습니까?")) return;
-
     try {
       await api.delete(`/schedules/${scheduleId}`);
       alert("일정이 성공적으로 삭제되었습니다.");
@@ -347,18 +372,42 @@ export default function App() {
   const adminMonth = adminCalMonth.getMonth();
   const adminFirstDay = new Date(adminYear, adminMonth, 1).getDay();
   const adminLastDate = new Date(adminYear, adminMonth + 1, 0).getDate();
+  const getScheduleRank = (item: ScheduleResponse): number => {
+    if (!item.grade || item.grade === 0) return 0; // 전체 공통 일정
+    if (!item.classNum || item.classNum === 0) return 1; // 학년 전체 일정
+    return 2; // 특정 반 일정
+  };
 
+  // 날짜 및 상위 필터 포함 로직 개선
+  // 날짜 및 상위 필터 포함 및 상위->하위 순서 정렬 로직
   const filteredSchedules = useMemo(() => {
     if (!selectedDate) return [];
-    return schedules.filter((item) => {
-      const itemDate = new Date(item.endDate);
-      return (
-        itemDate.getFullYear() === selectedDate.getFullYear() &&
-        itemDate.getMonth() === selectedDate.getMonth() &&
-        itemDate.getDate() === selectedDate.getDate()
-      );
-    });
-  }, [schedules, selectedDate]);
+    return schedules
+      .filter((item) => {
+        const itemDate = new Date(item.endDate);
+        const isSameDate =
+          itemDate.getFullYear() === selectedDate.getFullYear() &&
+          itemDate.getMonth() === selectedDate.getMonth() &&
+          itemDate.getDate() === selectedDate.getDate();
+
+        if (!isSameDate) return false;
+
+        // 상위 (전체/학년전체) 일정 포함 필터링
+        if (grade === 0) return true; // 전체 학급 선택 시 모든 날짜 일치건 표시
+        if (item.grade === null || item.grade === 0) return true; // 전체 공통 일정 표시
+        if (item.grade === grade) {
+          if (classNum === 0) return true; // 특정 학년 전체 선택 시 해당 학년 공통 + 반 일정
+          return (
+            item.classNum === null ||
+            item.classNum === 0 ||
+            item.classNum === classNum
+          ); // 특정 반 선택 시 상위 학년 공통 포함
+        }
+
+        return false;
+      })
+      .sort((a, b) => getScheduleRank(a) - getScheduleRank(b)); // 전체 공통 -> 학년 전체 -> 반별 순 정렬
+  }, [schedules, selectedDate, grade, classNum]);
 
   return (
     <div
@@ -446,46 +495,44 @@ export default function App() {
               {selectedTarget === "전체 학급" && <span>✓</span>}
             </button>
 
-            {[1, 2, 3].map((grade) => (
+            {[1, 2, 3].map((g) => (
               <div
-                key={grade}
+                key={g}
                 style={{ borderColor: "rgba(55, 57, 59, 0.5)" }}
                 className="border-t"
               >
                 <div className="flex items-center justify-between px-4 py-2 hover:bg-[#282a2c] transition-colors">
                   <button
                     onClick={() => {
-                      setGrade(grade);
+                      setGrade(g);
                       setClassNum(0);
-                      setSelectedTarget(`${grade}학년 전체`);
+                      setSelectedTarget(`${g}학년 전체`);
                       setIsFilterOpen(false);
                     }}
                     className="text-sm font-medium text-[#e3e2e6] text-left flex-1"
                   >
-                    {grade}학년 전체 학급
+                    {g}학년 전체 학급
                   </button>
                   <button
-                    onClick={() =>
-                      setOpenGrade(openGrade === grade ? null : grade)
-                    }
+                    onClick={() => setOpenGrade(openGrade === g ? null : g)}
                     className="text-xs text-[#9aa0a6] px-2 py-1 hover:text-white"
                   >
-                    {openGrade === grade ? "▲" : "▼"}
+                    {openGrade === g ? "▲" : "▼"}
                   </button>
                 </div>
 
-                {openGrade === grade && (
+                {openGrade === g && (
                   <div
                     style={{ borderColor: "#37393b" }}
                     className="bg-black/40 px-3 py-2 grid grid-cols-3 gap-1.5 border-y animate-in fade-in duration-150"
                   >
-                    {CLASS_NUMBERS.map((classNum) => (
+                    {CLASS_NUMBERS.map((cNum) => (
                       <button
-                        key={classNum}
+                        key={cNum}
                         onClick={() => {
-                          setGrade(grade);
-                          setClassNum(classNum);
-                          setSelectedTarget(`${grade}학년 ${classNum}반`);
+                          setGrade(g);
+                          setClassNum(cNum);
+                          setSelectedTarget(`${g}학년 ${cNum}반`);
                           setIsFilterOpen(false);
                         }}
                         style={{
@@ -494,7 +541,7 @@ export default function App() {
                         }}
                         className="py-1 px-2 text-xs text-[#e3e2e6] hover:bg-[#282a2c] active:scale-[0.95] rounded-lg border text-center transition-all"
                       >
-                        {classNum}반
+                        {cNum}반
                       </button>
                     ))}
                   </div>
@@ -627,9 +674,11 @@ export default function App() {
                         </h4>
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded">
-                            {item.grade === 0
+                            {!item.grade || item.grade === 0
                               ? "전체"
-                              : `${item.grade}학년 ${item.classNum}반`}
+                              : item.classNum
+                                ? `${item.grade}학년 ${item.classNum}반`
+                                : `${item.grade}학년 전체`}
                           </span>
                           {isAdmin && (
                             <button
@@ -813,7 +862,7 @@ export default function App() {
                 </button>
               </div>
               <button
-                onClick={() => setIsAdminOpen(false)}
+                onClick={closeAdminModal}
                 className="text-[#9aa0a6] hover:text-white font-bold transition-colors"
               >
                 ✕
@@ -961,7 +1010,6 @@ export default function App() {
                         targetScheduleDate.getDate() === d &&
                         targetScheduleDate.getMonth() === adminMonth &&
                         targetScheduleDate.getFullYear() === adminYear;
-
                       return (
                         <button
                           key={d}
