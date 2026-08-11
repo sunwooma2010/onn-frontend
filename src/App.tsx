@@ -177,16 +177,28 @@ export default function App() {
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
     try {
-      const [commonRes, ...gradeResList] = await Promise.all([
-        api.get<ScheduleResponse[]>("/schedules"),
+      const gradeClassCombos: { grade: number; classNum: number }[] = [];
+      for (const g of [1, 2, 3]) {
+        for (const c of CLASS_NUMBERS) {
+          gradeClassCombos.push({ grade: g, classNum: c });
+        }
+      }
+
+      const [commonRes, ...restResList] = await Promise.all([
+        api.get<ScheduleResponse[]>("/schedules"), // 전체 공통
         ...[1, 2, 3].map((g) =>
           api.get<ScheduleResponse[]>("/schedules", { params: { grade: g } }),
+        ), // 학년 전체(반 없음)
+        ...gradeClassCombos.map(({ grade: g, classNum: c }) =>
+          api.get<ScheduleResponse[]>("/schedules", {
+            params: { grade: g, classNum: c },
+          }),
         ),
       ]);
 
       const merged = [
         ...commonRes.data,
-        ...gradeResList.flatMap((res) => res.data),
+        ...restResList.flatMap((res) => res.data),
       ];
 
       const uniqueSchedules = Array.from(
@@ -218,14 +230,13 @@ export default function App() {
   const handleLogout = () => {
     api
       .delete("/token")
-      .then(() => {
+      .catch((err) => {
+        console.error("로그아웃 요청 실패:", err);
+      })
+      .finally(() => {
         setUser(null);
         setIsAdminOpen(false);
         alert("로그아웃 되었습니다.");
-      })
-      .catch((err) => {
-        console.error("로그아웃 실패:", err);
-        setUser(null);
       });
   };
 
